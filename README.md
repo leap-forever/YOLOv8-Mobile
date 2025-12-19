@@ -50,7 +50,7 @@ YOLOv8-Mobile aims to bring the efficiency and accuracy of the YOLOv8 model to m
 
 ### Prerequisites
 
-- Android Studio / Xcode
+- Android Studio
 - CMake
 - NCNN
 - OpenCV-Mobile
@@ -69,12 +69,6 @@ cd YOLOv8-Mobile
 1. Open the project in Android Studio.
 2. Sync the project with Gradle files.
 3. Build the APK using Android Studio.
-
-#### iOS
-
-1. Open the Xcode project located in the `ios` directory.
-2. Set up the necessary dependencies.
-3. Build and run the project on your device or simulator.
 
 ## Usage
 
