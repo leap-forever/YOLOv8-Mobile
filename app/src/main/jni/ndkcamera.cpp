@@ -274,6 +274,44 @@ int NdkCamera::open(int _camera_facing)
     {
         ACameraDevice_createCaptureRequest(camera_device, TEMPLATE_PREVIEW, &capture_request);
 
+        // Set FPS range to 10 fps
+        {
+            ACameraMetadata* camera_metadata = 0;
+            ACameraManager_getCameraCharacteristics(camera_manager, camera_id.c_str(), &camera_metadata);
+
+            ACameraMetadata_const_entry fps_ranges;
+            if (ACameraMetadata_getConstEntry(camera_metadata, ACAMERA_CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES, &fps_ranges) == ACAMERA_OK)
+            {
+                int32_t target_fps = 10;
+                int32_t best_range_min = fps_ranges.data.i32[0];
+                int32_t best_range_max = fps_ranges.data.i32[1];
+
+                // Find the best FPS range that includes 10 fps
+                for (uint32_t i = 0; i < fps_ranges.count; i += 2)
+                {
+                    int32_t min_fps = fps_ranges.data.i32[i];
+                    int32_t max_fps = fps_ranges.data.i32[i + 1];
+
+                    if (min_fps <= target_fps && max_fps >= target_fps)
+                    {
+                        // Prefer range that is closest to 10 fps
+                        if (abs(max_fps - target_fps) < abs(best_range_max - target_fps))
+                        {
+                            best_range_min = min_fps;
+                            best_range_max = target_fps;
+                        }
+                    }
+                }
+
+                // Set the FPS range
+                ACaptureRequest_setEntry_i32(capture_request, ACAMERA_CONTROL_AE_TARGET_FPS_RANGE, 2, (int32_t[]){best_range_min, best_range_max});
+
+                __android_log_print(ANDROID_LOG_WARN, "NdkCamera", "FPS range set to [%d, %d]", best_range_min, best_range_max);
+            }
+
+            ACameraMetadata_free(camera_metadata);
+        }
+
         ACameraOutputTarget_create(image_reader_surface, &image_reader_target);
         ACaptureRequest_addTarget(capture_request, image_reader_target);
     }
