@@ -98,6 +98,10 @@ static int draw_fps(cv::Mat& rgb)
 
 static Yolo* g_yolo = 0;
 static ncnn::Mutex lock;
+static jobject g_callback_obj = 0;
+static JavaVM* g_vm = 0;
+static JNIEnv* g_env = 0;
+static jmethodID g_on_person_detected_method = 0;
 
 class MyNdkCamera : public NdkCameraWindow
 {
@@ -115,6 +119,45 @@ void MyNdkCamera::on_image_render(cv::Mat& rgb) const
         {
             std::vector<Object> objects;
             g_yolo->detect(rgb, objects);
+
+            // Check if person (label 0) is detected
+            bool person_detected = false;
+            float max_confidence = 0.0f;
+
+            for (size_t i = 0; i < objects.size(); i++)
+            {
+                if (objects[i].label == 0) // 0 is "person" in COCO dataset
+                {
+                    person_detected = true;
+                    if (objects[i].prob > max_confidence)
+                    {
+                        max_confidence = objects[i].prob;
+                    }
+                }
+            }
+
+            // Log person detection
+            if (person_detected)
+            {
+                __android_log_print(ANDROID_LOG_DEBUG, "ncnn", "Person detected with confidence: %.2f", max_confidence);
+            }
+
+            // Call back to Java if person is detected
+            if (person_detected && g_callback_obj && g_on_person_detected_method && g_vm)
+            {
+                __android_log_print(ANDROID_LOG_DEBUG, "ncnn", "Calling Java callback...");
+                JNIEnv* env = nullptr;
+                if (g_vm->GetEnv((void**)&env, JNI_VERSION_1_4) == JNI_EDETACHED)
+                {
+                    g_vm->AttachCurrentThread(&env, nullptr);
+                }
+
+                if (env)
+                {
+                    env->CallVoidMethod(g_callback_obj, g_on_person_detected_method, (jfloat)max_confidence);
+                    __android_log_print(ANDROID_LOG_DEBUG, "ncnn", "Java callback completed");
+                }
+            }
 
             g_yolo->draw(rgb, objects);
         }
@@ -135,6 +178,7 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved)
 {
     __android_log_print(ANDROID_LOG_DEBUG, "ncnn", "JNI_OnLoad");
 
+    g_vm = vm;
     g_camera = new MyNdkCamera;
 
     return JNI_VERSION_1_4;
@@ -153,6 +197,12 @@ JNIEXPORT void JNI_OnUnload(JavaVM* vm, void* reserved)
 
     delete g_camera;
     g_camera = 0;
+
+    if (g_callback_obj && g_env)
+    {
+        g_env->DeleteGlobalRef(g_callback_obj);
+        g_callback_obj = 0;
+    }
 }
 
 // public native boolean loadModel(AssetManager mgr, int modelid, int cpugpu);
@@ -162,6 +212,24 @@ JNIEXPORT jboolean JNICALL Java_com_xvesa_yolov8mobile_Yolov8Ncnn_loadModel(JNIE
     {
         return JNI_FALSE;
     }
+
+    // Store the callback object
+    if (g_callback_obj)
+    {
+        env->DeleteGlobalRef(g_callback_obj);
+    }
+    g_callback_obj = env->NewGlobalRef(thiz);
+
+    // Get the method ID for onPersonDetected
+    jclass clazz = env->GetObjectClass(thiz);
+    g_on_person_detected_method = env->GetMethodID(clazz, "onPersonDetected", "(F)V");
+
+    __android_log_print(ANDROID_LOG_DEBUG, "ncnn", "Callback method ID: %p", g_on_person_detected_method);
+    __android_log_print(ANDROID_LOG_DEBUG, "ncnn", "Callback object: %p", g_callback_obj);
+    __android_log_print(ANDROID_LOG_DEBUG, "ncnn", "JavaVM: %p", g_vm);
+
+    // Store JNIEnv
+    g_env = env;
 
     AAssetManager* mgr = AAssetManager_fromJava(env, assetManager);
 

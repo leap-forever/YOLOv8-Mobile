@@ -2,8 +2,11 @@ package com.xvesa.yolov8mobile
 
 import android.Manifest
 import android.app.Activity
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.pm.PackageManager
 import android.graphics.PixelFormat
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.SurfaceHolder
@@ -14,6 +17,8 @@ import android.widget.AdapterView
 import android.widget.Button
 import android.widget.Spinner
 import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 
 class MainActivity : Activity(), SurfaceHolder.Callback {
@@ -27,12 +32,20 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
 
     private var cameraView: SurfaceView? = null
 
+    private var lastNotificationTime = 0L
+    private val notificationCooldown = 3000L // 3秒通知冷却时间
+
+    private val CHANNEL_ID = "person_detection_channel"
+    private val NOTIFICATION_ID = 1001
+
     /** Called when the activity is first created.  */
     public override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.main_activity)
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        createNotificationChannel()
 
         cameraView = findViewById<View>(R.id.camera_view) as SurfaceView
 
@@ -84,7 +97,62 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             }
         }
 
+        yolov8Ncnn.setOnPersonDetectedListener(object : Yolov8Ncnn.OnPersonDetectedListener {
+            override fun onPersonDetected(confidence: Float) {
+                showPersonNotification(confidence)
+            }
+        })
+
         reload()
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val name = "人物检测通知"
+            val descriptionText = "检测到人物时发送通知"
+            val importance = NotificationManager.IMPORTANCE_DEFAULT
+            val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
+                description = descriptionText
+            }
+            val notificationManager = getSystemService(NotificationManager::class.java)
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun showPersonNotification(confidence: Float) {
+        val currentTime = System.currentTimeMillis()
+        if (currentTime - lastNotificationTime < notificationCooldown) {
+            return
+        }
+        lastNotificationTime = currentTime
+
+        if (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    REQUEST_NOTIFICATIONS
+                )
+            }
+            return
+        }
+
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.app_logo)
+            .setContentTitle("检测到人物")
+            .setContentText("置信度: ${(confidence * 100).toInt()}%")
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+
+        with(NotificationManagerCompat.from(this)) {
+            notify(NOTIFICATION_ID, builder.build())
+        }
+
+        Log.d("MainActivity", "Person detected notification sent with confidence: $confidence")
     }
 
     private fun reload() {
@@ -130,5 +198,6 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
 
     companion object {
         const val REQUEST_CAMERA: Int = 100
+        const val REQUEST_NOTIFICATIONS: Int = 101
     }
 }
